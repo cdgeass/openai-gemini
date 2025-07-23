@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 
 export default {
-  async fetch (request) {
+  async fetch(request) {
     if (request.method === "OPTIONS") {
       return handleOPTIONS();
     }
@@ -30,6 +30,9 @@ export default {
         case pathname.endsWith("/models"):
           assert(request.method === "GET");
           return handleModels(apiKey)
+            .catch(errHandler);
+        case pathname.startsWith(`/${API_VERSION}`):
+          return handleDefault(request)
             .catch(errHandler);
         default:
           throw new HttpError("404 Not Found", 404);
@@ -64,8 +67,16 @@ const handleOPTIONS = async () => {
   });
 };
 
-const BASE_URL = "https://generativelanguage.googleapis.com";
+const HOST = "generativelanguage.googleapis.com";
+const BASE_URL = `https://${HOST}`;
 const API_VERSION = "v1beta";
+
+async function handleDefault(request) {
+  const url = new URL(request.url);
+  url.host = HOST;
+  return fetch(new Request(url, request))
+    .then(response => new Response(response.body, fixCors(response)));
+};
 
 // https://github.com/google-gemini/generative-ai-js/blob/cf223ff4a1ee5a2d944c53cddb8976136382bee6/src/requests/request.ts#L71
 const API_CLIENT = "genai-js/0.21.0"; // npm view @google/generative-ai version
@@ -75,7 +86,7 @@ const makeHeaders = (apiKey, more) => ({
   ...more
 });
 
-async function handleModels (apiKey) {
+async function handleModels(apiKey) {
   const response = await fetch(`${BASE_URL}/${API_VERSION}/models`, {
     headers: makeHeaders(apiKey),
   });
@@ -96,7 +107,7 @@ async function handleModels (apiKey) {
 }
 
 const DEFAULT_EMBEDDINGS_MODEL = "text-embedding-004";
-async function handleEmbeddings (req, apiKey) {
+async function handleEmbeddings(req, apiKey) {
   if (typeof req.model !== "string") {
     throw new HttpError("model is not specified", 400);
   }
@@ -110,7 +121,7 @@ async function handleEmbeddings (req, apiKey) {
     model = "models/" + req.model;
   }
   if (!Array.isArray(req.input)) {
-    req.input = [ req.input ];
+    req.input = [req.input];
   }
   const response = await fetch(`${BASE_URL}/${API_VERSION}/${model}:batchEmbedContents`, {
     method: "POST",
@@ -140,7 +151,7 @@ async function handleEmbeddings (req, apiKey) {
 }
 
 const DEFAULT_MODEL = "gemini-2.5-flash";
-async function handleCompletions (req, apiKey) {
+async function handleCompletions(req, apiKey) {
   let model = DEFAULT_MODEL;
   switch (true) {
     case typeof req.model !== "string":
@@ -169,10 +180,10 @@ async function handleCompletions (req, apiKey) {
   switch (true) {
     case model.endsWith(":search"):
       model = model.substring(0, model.length - 7);
-      // eslint-disable-next-line no-fallthrough
+    // eslint-disable-next-line no-fallthrough
     case req.model.endsWith("-search-preview"):
       body.tools = body.tools || [];
-      body.tools.push({googleSearch: {}});
+      body.tools.push({ googleSearch: {} });
   }
   const TASK = req.stream ? "streamGenerateContent" : "generateContent";
   let url = `${BASE_URL}/${API_VERSION}/models/${model}:${TASK}`;
@@ -286,7 +297,7 @@ const transformConfig = (req) => {
           cfg.responseMimeType = "text/x.enum";
           break;
         }
-        // eslint-disable-next-line no-fallthrough
+      // eslint-disable-next-line no-fallthrough
       case "json_object":
         cfg.responseMimeType = "application/json";
         break;
@@ -377,7 +388,7 @@ const transformFnCalls = ({ tool_calls }) => {
       console.error("Error parsing function arguments:", err);
       throw new HttpError("Invalid function arguments: " + argstr, 400);
     }
-    calls[id] = {i, name};
+    calls[id] = { i, name };
     return {
       functionCall: {
         id: id.startsWith("call_") ? null : id,
@@ -480,7 +491,7 @@ const transformTools = (req) => {
     tools = [{ function_declarations: funcs.map(schema => schema.function) }];
   }
   if (req.tool_choice) {
-    const allowed_function_names = req.tool_choice?.type === "function" ? [ req.tool_choice?.function?.name ] : undefined;
+    const allowed_function_names = req.tool_choice?.type === "function" ? [req.tool_choice?.function?.name] : undefined;
     if (allowed_function_names || typeof req.tool_choice === "string") {
       tool_config = {
         function_calling_config: {
@@ -574,20 +585,20 @@ const processCompletionsResponse = (data, model, id) => {
   const obj = {
     id,
     choices: data.candidates.map(transformCandidatesMessage),
-    created: Math.floor(Date.now()/1000),
+    created: Math.floor(Date.now() / 1000),
     model: data.modelVersion ?? model,
     //system_fingerprint: "fp_69829325d0",
     object: "chat.completion",
     usage: data.usageMetadata && transformUsage(data.usageMetadata),
   };
-  if (obj.choices.length === 0 ) {
+  if (obj.choices.length === 0) {
     checkPromptBlock(obj.choices, data.promptFeedback, "message");
   }
   return JSON.stringify(obj);
 };
 
 const responseLineRE = /^data: (.*)(?:\n\n|\r\r|\r\n\r\n)/;
-function parseStream (chunk, controller) {
+function parseStream(chunk, controller) {
   this.buffer += chunk;
   do {
     const match = this.buffer.match(responseLineRE);
@@ -596,7 +607,7 @@ function parseStream (chunk, controller) {
     this.buffer = this.buffer.substring(match[0].length);
   } while (true); // eslint-disable-line no-constant-condition
 }
-function parseStreamFlush (controller) {
+function parseStreamFlush(controller) {
   if (this.buffer) {
     console.error("Invalid data:", this.buffer);
     controller.enqueue(this.buffer);
@@ -606,10 +617,10 @@ function parseStreamFlush (controller) {
 
 const delimiter = "\n\n";
 const sseline = (obj) => {
-  obj.created = Math.floor(Date.now()/1000);
+  obj.created = Math.floor(Date.now() / 1000);
   return "data: " + JSON.stringify(obj) + delimiter;
 };
-function toOpenAiStream (line, controller) {
+function toOpenAiStream(line, controller) {
   let data;
   try {
     data = JSON.parse(line);
@@ -618,7 +629,7 @@ function toOpenAiStream (line, controller) {
     }
   } catch (err) {
     console.error("Error parsing response:", err);
-    if (!this.shared.is_buffers_rest) { line =+ delimiter; }
+    if (!this.shared.is_buffers_rest) { line = + delimiter; }
     controller.enqueue(line); // output as is
     return;
   }
@@ -657,7 +668,7 @@ function toOpenAiStream (line, controller) {
   cand.delta = {};
   this.last[cand.index] = obj;
 }
-function toOpenAiStreamFlush (controller) {
+function toOpenAiStreamFlush(controller) {
   if (this.last.length > 0) {
     for (const obj of this.last) {
       controller.enqueue(sseline(obj));
