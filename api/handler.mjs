@@ -27,4 +27,5 @@ export const config = {
     "sin1",
     "syd1",
   ],
+  maxDuration: 60
 };
